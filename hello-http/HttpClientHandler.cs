@@ -7,8 +7,7 @@ public class HttpClientHandler
     private readonly BufferedStream _writer;
     private readonly BufferedStream _reader;
     private readonly SearchBytes _crlfSb = new("\r\n"u8.ToArray());
-    private readonly SearchBytes _contentLengthSb = new("content-length:"u8.ToArray());
-    // private readonly SearchBytes _headerSeparatorSb = new(new[] { (byte)':' });
+    private readonly SearchBytes _headerSeparatorSb = new(new[] { (byte)':' });
     private readonly CancellationToken _cancellationToken;
 
     public HttpClientHandler(Stream stream, CancellationToken cancellationToken = default)
@@ -20,7 +19,7 @@ public class HttpClientHandler
 
     public async Task<(MemoryStream lh, string requestLine, int contentLength)> ParseLineAndBodyAsync()
     {
-        var lh = new MemoryStream();
+        var lh = new MemoryStream(1024);
         var buf = new byte[1];
         var requestLine = "";
         var requestLineOk = false;
@@ -28,7 +27,7 @@ public class HttpClientHandler
         do
         {
             _crlfSb.Reset();
-            _contentLengthSb.Reset();
+            _headerSeparatorSb.Reset();
             while (true)
             {
                 if (await _reader.ReadAsync(buf, _cancellationToken) < 0)
@@ -46,29 +45,37 @@ public class HttpClientHandler
 
                 if (requestLineOk)
                 {
-                    _contentLengthSb.Search(b >= 'A' && b <= 'Z' ? (byte)(32 + b) : b);
+                    _headerSeparatorSb.Search(b);
                 }
             }
 
-            if (requestLineOk)
+            var buffer = lh.GetBuffer();
+            var lineEnd = (int)lh.Length - _crlfSb.Length();
+            var lineStart = lineEnd - _crlfSb.Result();
+            if (!requestLineOk)
             {
-                var i = _contentLengthSb.Result();
-                Console.WriteLine(i);
-                if (i < 0)
-                {
-                    continue;
-                }
-                i += _contentLengthSb.Length();
-                var buffer = lh.GetBuffer();
-                var length = (int)lh.Length - _crlfSb.Length();
-                contentLength = int.Parse(
-                    Encoding.ASCII.GetString(buffer[(length - _crlfSb.Result() + i)..length]).Trim());
-                break;
+                requestLine = Encoding.ASCII.GetString(buffer[lineStart..lineEnd]);
+                requestLineOk = true;
+                continue;
             }
 
-            var length2 = (int)lh.Length - _crlfSb.Length();
-            requestLine = Encoding.ASCII.GetString(lh.GetBuffer()[(length2 - _crlfSb.Result())..length2]);
-            requestLineOk = true;
+            var headerSeparatorIndex = _headerSeparatorSb.Result();
+            if (headerSeparatorIndex < 0)
+            {
+                // Bad request header line
+                continue;
+            }
+            headerSeparatorIndex += lineStart;
+            var headerName = Encoding.ASCII.GetString(buffer[lineStart..headerSeparatorIndex]).Trim().ToLower();
+            if (headerName != "content-length")
+            {
+                continue;
+            }
+            var headerValue =
+                Encoding.ASCII.GetString(buffer[(headerSeparatorIndex + _headerSeparatorSb.Length())..lineEnd]).Trim();
+            // Console.WriteLine("'{0}': '{1}'", headerName, headerValue);
+            contentLength = int.Parse(headerValue);
+            break;
         } while (_crlfSb.Result() != 0);
 
         while (_crlfSb.Result() != 0)
