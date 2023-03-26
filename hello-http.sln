@@ -1,0 +1,16 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "hello-http", "hello-http\hello-http.csproj", "{3B56ED0A-5FD4-4D4A-8835-381488D43DA3}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{3B56ED0A-5FD4-4D4A-8835-381488D43DA3}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{3B56ED0A-5FD4-4D4A-8835-381488D43DA3}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{3B56ED0A-5FD4-4D4A-8835-381488D43DA3}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{3B56ED0A-5FD4-4D4A-8835-381488D43DA3}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+EndGlobal
