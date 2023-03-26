@@ -98,6 +98,12 @@ Options:
         }
     }
 
+    private static string GetMethod(string requestLine)
+    {
+        var i = requestLine.IndexOf(' ') + 1;
+        return i > 0 && i <= requestLine.Length ? requestLine[..i].ToLowerInvariant() : "";
+    }
+
     private static async Task HandleClientIeAsync(TcpClient client)
     {
         try
@@ -110,25 +116,13 @@ Options:
         }
         finally
         {
-            await client.GetStream().DisposeAsync();
             client.Dispose();
         }
     }
 
     private static async Task HandleClientAsync(TcpClient client)
     {
-        Console.WriteLine("Receive");
-
-        var writer = new StreamWriter(client.GetStream());
-        writer.NewLine = "\r\n";
-        writer.WriteLine("HTTP/1.0 200 OK");
-        writer.WriteLine("Content-Type: text/plain; charset=UTF-8");
-        writer.WriteLine();
-        writer.WriteLine("Hello, world!");
-        writer.Flush();
-
-        var reader = new BufferedStream(client.GetStream());
-        // var writer = new BufferedStream(client.GetStream());
+        var stream = client.GetStream();
         var crlfSb = new SearchBytes("\r\n"u8.ToArray());
         var headerSeparatorSb = new SearchBytes(new[] { (byte)':' });
         var lh = new MemoryStream(1024);
@@ -141,7 +135,7 @@ Options:
             headerSeparatorSb.Reset();
             while (true)
             {
-                if (await reader.ReadAsync(buf, CancellationToken) < 0)
+                if (await stream.ReadAsync(buf, CancellationToken) < 0)
                 {
                     throw new IOException("EOF");
                 }
@@ -165,9 +159,25 @@ Options:
             var lineStart = lineEnd - crlfSb.Result();
             if (!requestLineOk)
             {
+                requestLineOk = true;
                 var requestLine = Encoding.ASCII.GetString(buffer[lineStart..lineEnd]);
                 Console.WriteLine(requestLine);
-                requestLineOk = true;
+                var method = GetMethod(requestLine);
+                if (method == ""
+                    || (_disallowedMethods != null && _disallowedMethods.Contains(method)) 
+                    || (_allowedMethods != null && !_allowedMethods.Contains(method)))
+                {
+                    await stream.WriteResponseCode(HttpStatusCode.MethodNotAllowed, CancellationToken);
+                    return;
+                }
+                await stream.WriteResponseCode(HttpStatusCode.OK, CancellationToken);
+                await stream.WriteAsync("Content-Type: text/plain"u8, CancellationToken);
+                await stream.WriteNewLineAsync(CancellationToken);
+                if (method == "HEAD")
+                {
+                    await stream.WriteNewLineAsync(CancellationToken);
+                    return;
+                }
                 continue;
             }
 
@@ -193,7 +203,7 @@ Options:
         while (crlfSb.Result() != 0)
         {
             crlfSb.Reset();
-            while (await reader.ReadAsync(buf, CancellationToken) > -1)
+            while (await stream.ReadAsync(buf, CancellationToken) > -1)
             {
                 var b = buf[0];
                 lh.WriteByte(b);
@@ -204,8 +214,15 @@ Options:
             }
         }
 
-        contentLength = (int)lh.Length + Math.Max(0, contentLength);
-        Console.WriteLine("Content-Length: " + contentLength);
+        contentLength = Math.Max(0, contentLength);
+        await stream.WriteAsync("Content-Length: "u8, CancellationToken);
+        await stream.WriteAsync(((int)lh.Length + contentLength).ToString(), CancellationToken);
+        await stream.WriteNewLineAsync(CancellationToken);
+        await stream.WriteNewLineAsync(CancellationToken);
+
+        lh.Seek(0, SeekOrigin.Begin);
+        await lh.CopyToAsync(stream);
+        await stream.CopyFromAsync(stream, contentLength, CancellationToken);
     }
 
     private static async Task Main(string[] args)
