@@ -6,6 +6,16 @@ namespace hello_http;
 
 public static class Program
 {
+    private static readonly CancellationTokenSource Cts = new();
+    private static readonly CancellationToken CancellationToken = Cts.Token;
+
+    private static void HandleCancelKeyPress(object? sender, ConsoleCancelEventArgs e)
+    {
+        Console.WriteLine("Exiting...");
+        e.Cancel = true;
+        Cts.Cancel();
+    }
+
     private const string FormatMethods = "<method>[,<method>...]";
     private static string _host = "127.0.0.1";
     private static int _port = 8080;
@@ -88,11 +98,11 @@ Options:
         }
     }
 
-    private static async Task HandleClientIeAsync(TcpClient client ,CancellationToken cancellationToken)
+    private static async Task HandleClientIeAsync(TcpClient client)
     {
         try
         {
-            await HandleClientAsync(client, cancellationToken);
+            await HandleClientAsync(client);
         }
         catch (Exception e)
         {
@@ -105,13 +115,9 @@ Options:
         }
     }
 
-    private static async Task HandleClientAsync(TcpClient client, CancellationToken cancellationToken)
+    private static async Task HandleClientAsync(TcpClient client)
     {
         Console.WriteLine("Receive");
-        var handler = new HttpClientHandler(client.GetStream(), cancellationToken);
-        var (_, requestLine, contentLength) = await handler.ParseLineAndBodyAsync();
-        Console.WriteLine("requestLine:'{0}'", requestLine);
-        Console.WriteLine("contentLength:" + contentLength);
 
         var writer = new StreamWriter(client.GetStream());
         writer.NewLine = "\r\n";
@@ -120,10 +126,96 @@ Options:
         writer.WriteLine();
         writer.WriteLine("Hello, world!");
         writer.Flush();
+
+        var reader = new BufferedStream(client.GetStream());
+        // var writer = new BufferedStream(client.GetStream());
+        var crlfSb = new SearchBytes("\r\n"u8.ToArray());
+        var headerSeparatorSb = new SearchBytes(new[] { (byte)':' });
+        var lh = new MemoryStream(1024);
+        var buf = new byte[1];
+        var requestLineOk = false;
+        var contentLength = 0;
+        do
+        {
+            crlfSb.Reset();
+            headerSeparatorSb.Reset();
+            while (true)
+            {
+                if (await reader.ReadAsync(buf, CancellationToken) < 0)
+                {
+                    throw new IOException("EOF");
+                }
+
+                var b = buf[0];
+                lh.WriteByte(b);
+
+                if (crlfSb.Search(b) > -1)
+                {
+                    break;
+                }
+
+                if (requestLineOk)
+                {
+                    headerSeparatorSb.Search(b);
+                }
+            }
+
+            var buffer = lh.GetBuffer();
+            var lineEnd = (int)lh.Length - crlfSb.Length();
+            var lineStart = lineEnd - crlfSb.Result();
+            if (!requestLineOk)
+            {
+                var requestLine = Encoding.ASCII.GetString(buffer[lineStart..lineEnd]);
+                Console.WriteLine(requestLine);
+                requestLineOk = true;
+                continue;
+            }
+
+            var headerSeparatorIndex = headerSeparatorSb.Result();
+            if (headerSeparatorIndex < 0)
+            {
+                // Bad request header line
+                continue;
+            }
+            headerSeparatorIndex += lineStart;
+            var headerName = Encoding.ASCII.GetString(buffer[lineStart..headerSeparatorIndex]).Trim().ToLower();
+            if (headerName != "content-length")
+            {
+                continue;
+            }
+            var headerValue =
+                Encoding.ASCII.GetString(buffer[(headerSeparatorIndex + headerSeparatorSb.Length())..lineEnd]).Trim();
+            // Console.WriteLine("'{0}': '{1}'", headerName, headerValue);
+            contentLength = int.Parse(headerValue);
+            break;
+        } while (crlfSb.Result() != 0);
+
+        while (crlfSb.Result() != 0)
+        {
+            crlfSb.Reset();
+            while (await reader.ReadAsync(buf, CancellationToken) > -1)
+            {
+                var b = buf[0];
+                lh.WriteByte(b);
+                if (crlfSb.Search(b) > -1)
+                {
+                    break;
+                }
+            }
+        }
+
+        contentLength = (int)lh.Length + Math.Max(0, contentLength);
+        Console.WriteLine("Content-Length: " + contentLength);
     }
 
-    private static async Task ListenAsync(CancellationToken cancellationToken)
+    private static async Task Main(string[] args)
     {
+        ParseArgs(args);
+
+        Console.CancelKeyPress += HandleCancelKeyPress;
+        
+        Console.WriteLine("Press Ctrl+C to exit.");
+
         IPAddress addr;
         switch (_host)
         {
@@ -147,28 +239,12 @@ Options:
         listener.Start();
         try
         {
-            while (!cancellationToken.IsCancellationRequested)
+            while (!CancellationToken.IsCancellationRequested)
             {
-                var client = await listener.AcceptTcpClientAsync(cancellationToken);
-                _ = HandleClientIeAsync(client, cancellationToken);
+                var client = await listener.AcceptTcpClientAsync(CancellationToken);
+                _ = HandleClientIeAsync(client);
             }
         }
         catch (OperationCanceledException) {}
-    }
-
-    private static async Task Main(string[] args)
-    {
-        ParseArgs(args);
-
-        var cts = new CancellationTokenSource();
-        Console.CancelKeyPress += (_, e) =>
-        {
-            Console.WriteLine("Exiting...");
-            e.Cancel = true;
-            cts.Cancel();
-        };
-        
-        Console.WriteLine("Press Ctrl+C to exit.");
-        await ListenAsync(cts.Token);
     }
 }

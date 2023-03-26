@@ -27,10 +27,10 @@ public class SearchBytes
     //     return _bytes;
     // }
 
-    public int Count()
-    {
-        return _count;
-    }
+    // public int Count()
+    // {
+    //     return _count;
+    // }
 
     public int Length()
     {
@@ -76,38 +76,9 @@ public class SearchBytes
     //     return -1;
     // }
 
-    public int Reset()
+    public void Reset()
     {
-        var count = _count;
         _index = 0;
         _count = 0;
-        return count;
-    }
-
-    public async Task<(int count, int result)> ReadAsync(
-        Stream src, MemoryStream dest, int count = -1, CancellationToken cancellationToken = default)
-    {
-        var r = Reset();
-        var i = 0;
-        if (r < 0)
-        {
-            var buf = new byte[1];
-            while (count < 0 || i < count)
-            {
-                var n = await src.ReadAsync(buf, cancellationToken);
-                if (n <= 0)
-                {
-                    return (i, -1);
-                }
-                dest.Write(buf);
-                ++i;
-                r = Search(buf[0]);
-                if (r > -1)
-                {
-                    break;
-                }
-            } 
-        }
-        return (i, r);
     }
 }
