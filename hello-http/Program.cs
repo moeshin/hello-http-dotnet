@@ -110,7 +110,7 @@ Options:
         Console.WriteLine("Receive");
         var handler = new HttpClientHandler(client.GetStream(), cancellationToken);
         var (_, requestLine, contentLength) = await handler.ParseLineAndBodyAsync();
-        Console.WriteLine("requestLine:" + requestLine);
+        Console.WriteLine("requestLine:'{0}'", requestLine);
         Console.WriteLine("contentLength:" + contentLength);
 
         var writer = new StreamWriter(client.GetStream());

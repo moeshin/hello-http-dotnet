@@ -8,6 +8,7 @@ public class HttpClientHandler
     private readonly BufferedStream _reader;
     private readonly SearchBytes _crlfSb = new("\r\n"u8.ToArray());
     private readonly SearchBytes _contentLengthSb = new("content-length:"u8.ToArray());
+    // private readonly SearchBytes _headerSeparatorSb = new(new[] { (byte)':' });
     private readonly CancellationToken _cancellationToken;
 
     public HttpClientHandler(Stream stream, CancellationToken cancellationToken = default)
@@ -21,7 +22,6 @@ public class HttpClientHandler
     {
         var lh = new MemoryStream();
         var buf = new byte[1];
-        var line = new StringBuilder();
         var requestLine = "";
         var requestLineOk = false;
         var contentLength = 0;
@@ -38,26 +38,16 @@ public class HttpClientHandler
 
                 var b = buf[0];
                 lh.WriteByte(b);
-                if (!requestLineOk)
+
+                if (_crlfSb.Search(b) > -1)
                 {
-                    line.Append((char) b);
+                    break;
                 }
 
-                if (_crlfSb.Search(b) < 0)
+                if (requestLineOk)
                 {
-                    if (requestLineOk)
-                    {
-                        _contentLengthSb.Search(b >= 'A' && b <= 'Z' ? (byte)(32 + b) : b);
-                    }
-                    continue;
+                    _contentLengthSb.Search(b >= 'A' && b <= 'Z' ? (byte)(32 + b) : b);
                 }
-
-                if (!requestLineOk)
-                {
-                    line.Length -= _crlfSb.Length();
-                }
-
-                break;
             }
 
             if (requestLineOk)
@@ -76,7 +66,8 @@ public class HttpClientHandler
                 break;
             }
 
-            requestLine = line.ToString();
+            var length2 = (int)lh.Length - _crlfSb.Length();
+            requestLine = Encoding.ASCII.GetString(lh.GetBuffer()[(length2 - _crlfSb.Result())..length2]);
             requestLineOk = true;
         } while (_crlfSb.Result() != 0);
 
