@@ -125,7 +125,7 @@ Options:
         var stream = client.GetStream();
         var crlfSb = new SearchBytes("\r\n"u8.ToArray());
         var headerSeparatorSb = new SearchBytes(new[] { (byte)':' });
-        var lh = new MemoryStream(1024);
+        using var lh = new MemoryStream(1024);
         var buf = new byte[1];
         var requestLineOk = false;
         var contentLength = 0;
@@ -216,12 +216,16 @@ Options:
 
         contentLength = Math.Max(0, contentLength);
         await stream.WriteAsync("Content-Length: "u8, CancellationToken);
-        await stream.WriteAsync(((int)lh.Length + contentLength).ToString(), CancellationToken);
+        await stream.WriteAsync(((int)lh.Length + contentLength + 12).ToString(), CancellationToken);
         await stream.WriteNewLineAsync(CancellationToken);
         await stream.WriteNewLineAsync(CancellationToken);
+        
+        await stream.WriteAsync("Hello HTTP\n\n"u8, CancellationToken);
 
         lh.Seek(0, SeekOrigin.Begin);
         await lh.CopyToAsync(stream);
+        await lh.DisposeAsync();
+
         await stream.CopyFromAsync(stream, contentLength, CancellationToken);
     }
 
