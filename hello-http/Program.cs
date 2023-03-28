@@ -127,17 +127,19 @@ Options:
         var headerSb = new SearchBytes(new[] { (byte)':' });
         using var cache = new MemoryStream(1024);
         var buf = new byte[1];
+        var eof = false;
         var requestLineOk = false;
         var contentLength = 0;
-        while (lineSb.Result() != 0)
+        while (!eof && lineSb.Result() != 0)
         {
             lineSb.Reset();
             headerSb.Reset();
             while (true)
             {
-                if (await stream.ReadAsync(buf, CancellationToken) < 0)
+                if (await stream.ReadAsync(buf, CancellationToken) <= 0)
                 {
-                    throw new IOException("EOF");
+                    eof = true;
+                    break;
                 }
 
                 var b = buf[0];
@@ -200,11 +202,16 @@ Options:
             break;
         }
 
-        while (lineSb.Result() != 0)
+        while (!eof && lineSb.Result() != 0)
         {
             lineSb.Reset();
-            while (await stream.ReadAsync(buf, CancellationToken) > -1)
+            while (true)
             {
+                if (await stream.ReadAsync(buf, CancellationToken) < 1)
+                {
+                    eof = true;
+                    break;
+                }
                 var b = buf[0];
                 cache.WriteByte(b);
                 if (lineSb.Search(b) > -1)
