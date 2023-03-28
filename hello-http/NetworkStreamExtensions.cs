@@ -30,6 +30,10 @@ public static class NetworkStreamExtensions
         await stream.WriteAsync(" "u8, cancellationToken);
         await stream.WriteAsync(code.ToString(), cancellationToken);
         await stream.WriteNewLineAsync(cancellationToken);
+        if (code != HttpStatusCode.OK)
+        {
+            await stream.WriteNewLineAsync(cancellationToken);
+        }
     }
 
     public static async Task CopyFromAsync(this NetworkStream dest, Stream src, int length,
@@ -37,17 +41,17 @@ public static class NetworkStreamExtensions
     {
         const int bufferSize = 1024;
         var buffer = new byte[bufferSize];
-        var totalBytesRead = 0;
-        while (totalBytesRead < length)
+        var total = 0;
+        while (total < length)
         {
-            var bytesToRead = Math.Min(bufferSize, length - totalBytesRead);
-            var bytesRead = await src.ReadAsync(buffer.AsMemory(0, bytesToRead), cancellationToken);
-            if (bytesRead == 0)
+            var bytesToRead = Math.Min(bufferSize, length - total);
+            var size = await src.ReadAsync(buffer.AsMemory(0, bytesToRead), cancellationToken);
+            if (size < 1)
             {
                 break;
             }
-            await dest.WriteAsync(buffer.AsMemory(0, bytesRead), cancellationToken);
-            totalBytesRead += bytesRead;
+            await dest.WriteAsync(buffer.AsMemory(0, size), cancellationToken);
+            total += size;
         }
     }
 }

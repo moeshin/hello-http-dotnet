@@ -123,16 +123,16 @@ Options:
     private static async Task HandleClientAsync(TcpClient client)
     {
         var stream = client.GetStream();
-        var crlfSb = new SearchBytes("\r\n"u8.ToArray());
-        var headerSeparatorSb = new SearchBytes(new[] { (byte)':' });
-        using var lh = new MemoryStream(1024);
+        var lineSb = new SearchBytes("\r\n"u8.ToArray());
+        var headerSb = new SearchBytes(new[] { (byte)':' });
+        using var cache = new MemoryStream(1024);
         var buf = new byte[1];
         var requestLineOk = false;
         var contentLength = 0;
-        do
+        while (lineSb.Result() != 0)
         {
-            crlfSb.Reset();
-            headerSeparatorSb.Reset();
+            lineSb.Reset();
+            headerSb.Reset();
             while (true)
             {
                 if (await stream.ReadAsync(buf, CancellationToken) < 0)
@@ -141,22 +141,22 @@ Options:
                 }
 
                 var b = buf[0];
-                lh.WriteByte(b);
+                cache.WriteByte(b);
 
-                if (crlfSb.Search(b) > -1)
+                if (lineSb.Search(b) > -1)
                 {
                     break;
                 }
 
                 if (requestLineOk)
                 {
-                    headerSeparatorSb.Search(b);
+                    headerSb.Search(b);
                 }
             }
 
-            var buffer = lh.GetBuffer();
-            var lineEnd = (int)lh.Length - crlfSb.Length();
-            var lineStart = lineEnd - crlfSb.Result();
+            var buffer = cache.GetBuffer();
+            var lineEnd = (int)cache.Length - lineSb.Length();
+            var lineStart = lineEnd - lineSb.Result();
             if (!requestLineOk)
             {
                 requestLineOk = true;
@@ -181,33 +181,33 @@ Options:
                 continue;
             }
 
-            var headerSeparatorIndex = headerSeparatorSb.Result();
-            if (headerSeparatorIndex < 0)
+            var headerIndex = headerSb.Result();
+            if (headerIndex < 0)
             {
                 // Bad request header line
                 continue;
             }
-            headerSeparatorIndex += lineStart;
-            var headerName = Encoding.ASCII.GetString(buffer[lineStart..headerSeparatorIndex]).Trim().ToLower();
+            headerIndex += lineStart;
+            var headerName = Encoding.ASCII.GetString(buffer[lineStart..headerIndex]).Trim().ToLower();
             if (headerName != "content-length")
             {
                 continue;
             }
             var headerValue =
-                Encoding.ASCII.GetString(buffer[(headerSeparatorIndex + headerSeparatorSb.Length())..lineEnd]).Trim();
+                Encoding.ASCII.GetString(buffer[(headerIndex + headerSb.Length())..lineEnd]).Trim();
             // Console.WriteLine("'{0}': '{1}'", headerName, headerValue);
             contentLength = int.Parse(headerValue);
             break;
-        } while (crlfSb.Result() != 0);
+        }
 
-        while (crlfSb.Result() != 0)
+        while (lineSb.Result() != 0)
         {
-            crlfSb.Reset();
+            lineSb.Reset();
             while (await stream.ReadAsync(buf, CancellationToken) > -1)
             {
                 var b = buf[0];
-                lh.WriteByte(b);
-                if (crlfSb.Search(b) > -1)
+                cache.WriteByte(b);
+                if (lineSb.Search(b) > -1)
                 {
                     break;
                 }
@@ -216,15 +216,15 @@ Options:
 
         contentLength = Math.Max(0, contentLength);
         await stream.WriteAsync("Content-Length: "u8, CancellationToken);
-        await stream.WriteAsync(((int)lh.Length + contentLength + 12).ToString(), CancellationToken);
+        await stream.WriteAsync(((int)cache.Length + contentLength + 12).ToString(), CancellationToken);
         await stream.WriteNewLineAsync(CancellationToken);
         await stream.WriteNewLineAsync(CancellationToken);
         
         await stream.WriteAsync("Hello HTTP\n\n"u8, CancellationToken);
 
-        lh.Seek(0, SeekOrigin.Begin);
-        await lh.CopyToAsync(stream);
-        await lh.DisposeAsync();
+        cache.Seek(0, SeekOrigin.Begin);
+        await cache.CopyToAsync(stream);
+        await cache.DisposeAsync();
 
         await stream.CopyFromAsync(stream, contentLength, CancellationToken);
     }
